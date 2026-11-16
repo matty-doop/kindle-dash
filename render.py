@@ -120,7 +120,8 @@ def fetch_events(now, days=7):
             continue
         seen[key] = ev
         out.append(ev)
-    return out
+    print(f"calendars: {len(urls)}, events: {len(out)}")
+    return out, len(urls)
 
 
 # ------------------------------------------------------------------ icons
@@ -227,7 +228,7 @@ def day_label(day, today):
 
 # ------------------------------------------------------------------- render
 
-def render(now, wx, events, errors):
+def render(now, wx, events, errors, note=""):
     img = Image.new("L", (W, H), WHITE)
     d = ImageDraw.Draw(img)
     today = now.date()
@@ -351,7 +352,7 @@ def render(now, wx, events, errors):
 
     # Footer ---------------------------------------------------------------
     d.line([M, footer_top, W - M, footer_top], fill=LIGHT, width=2)
-    stamp = f"Updated {now.strftime('%a')} {fmt_time(now)}"
+    stamp = f"Updated {now.strftime('%a')} {fmt_time(now)}" + (f"  ·  {note}" if note else "")
     if errors:
         stamp += "  ·  " + " / ".join(errors)
     d.text((M, footer_top + 18), stamp, font=font("Regular", 24), fill=MID)
@@ -393,9 +394,10 @@ def mock(now):
 def main():
     now = dt.datetime.now(TZ)
     out = Path(os.environ.get("OUT", "out/dashboard.png"))
-    errors = []
+    errors, note = [], ""
     if "--mock" in sys.argv:
         wx, events = mock(now)
+        note = "2 calendars"
     else:
         try:
             wx = fetch_weather()
@@ -403,11 +405,12 @@ def main():
             print("weather error:", e, file=sys.stderr)
             wx, errors = None, errors + ["weather failed"]
         try:
-            events = fetch_events(now)
+            events, ncal = fetch_events(now)
+            note = "no calendars set" if ncal == 0 else f"{ncal} calendar{'s' if ncal > 1 else ''}"
         except Exception as e:
             print("calendar error:", e, file=sys.stderr)
             events, errors = [], errors + ["calendar failed"]
-    img = render(now, wx, events, errors)
+    img = render(now, wx, events, errors, note)
     out.parent.mkdir(parents=True, exist_ok=True)
     img.save(out, optimize=True)
     print("wrote", out)
