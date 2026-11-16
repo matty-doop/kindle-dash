@@ -1,0 +1,4 @@
+pillow>=10
+requests>=2.31
+icalendar>=5
+recurring-ical-events>=2.2
