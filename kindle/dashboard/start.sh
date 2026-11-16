@@ -60,6 +60,16 @@ fix_clock() {
 }
 fix_clock
 
+# Force the display out of the Kindle's dark (inverted) mode while the window
+# manager is still running; once X is stopped the inversion can't be changed.
+# Set DARK_MODE=1 in config.sh to keep it inverted on purpose.
+if [ "${DARK_MODE:-0}" = 1 ]; then
+  lipc-set-prop com.lab126.winmgr epdcMode Y8INV 2>/dev/null
+else
+  lipc-set-prop com.lab126.winmgr epdcMode Y8 2>/dev/null
+fi
+sleep 1
+
 # Take over the panel: stop the whole display stack (framework, pillow,
 # screensaver) so nothing repaints over the dashboard.
 stop x 2>/dev/null
