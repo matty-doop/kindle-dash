@@ -416,6 +416,26 @@ check_battery() {
   fi
 }
 
+# ---- battery readout ----------------------------------------------------------
+# Drawn in the dashboard's bottom-right corner (the renderer leaves it empty),
+# using the same Inter font. Redrawn after every new image, and otherwise only
+# when the text changes, as a small partial refresh (no flash).
+SHOW_BATTERY="${SHOW_BATTERY:-1}"
+BATT_FONT="$DIR/fonts/Inter-Medium.otf"
+batt_drawn=""
+draw_battery() {
+  [ "$SHOW_BATTERY" = 1 ] && [ -n "$FBINK" ] && [ -f "$BATT_FONT" ] && [ "$state" = ok ] || return 0
+  [ "$batt_warned" = 1 ] && return 0
+  case "$bstat" in
+    Charging) txt="Charging ${bcap}%" ;;
+    Full)     txt="Charged ${bcap}%" ;;
+    *)        txt="Battery ${bcap}%" ;;
+  esac
+  [ "$1" != force ] && [ "$txt" = "$batt_drawn" ] && return 0
+  "$FBINK" -q -C GRAY7 -t regular="$BATT_FONT",px=24,top=1394,bottom=10,left=-262,right=56,padding=BOTH \
+    "$txt" >/dev/null 2>&1 && batt_drawn=$txt
+}
+
 # ---- polling ----------------------------------------------------------------
 
 # Draw an error screen once; do nothing if it's already on screen (no flashing).
@@ -447,6 +467,7 @@ poll() {
     mv "${PNG}.tmp" "$PNG"
     draw_png "$PNG"
     fails=0; net_fails=0; state=ok
+    draw_battery force
     log "redraw (changed)"
   elif [ "$code" = "304" ]; then
     rm -f "${PNG}.tmp"
@@ -512,6 +533,7 @@ while true; do
   fi
   check_battery
   poll
+  draw_battery
   choose_mode
   if [ "$MODE" = "awake" ]; then
     sleep "$WAIT"

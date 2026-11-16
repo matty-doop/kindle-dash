@@ -22,6 +22,12 @@ Weather + Google Calendar on a jailbroken Kindle Paperwhite 4 (1072×1448).
 5. On the Kindle, set `DASH_URL` in `dashboard/config.sh` to that address (and optionally
    `WIFI_SSID` / `WIFI_PSK`), then tap **Start Dashboard** in the library.
 
+**Extras:**
+- Weather alerts from the National Weather Service appear as a banner when active.
+- Start a calendar event's title with `*` (e.g. `*Thanksgiving`) to get a countdown chip.
+- Sunrise, sunset and moon phase sit under the date.
+- The Kindle draws its own battery level bottom-right (`SHOW_BATTERY=0` in config.sh to hide).
+
 **Exit:** hold the power button ~40 s until the Kindle restarts. Nothing starts on boot.
 
 **Preview locally:** `python render.py --mock` writes `out/dashboard.png` with sample data.
