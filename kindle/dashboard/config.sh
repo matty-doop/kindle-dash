@@ -1,7 +1,7 @@
 # Dashboard settings. Edit DASH_URL (and optionally Wi-Fi) before first start.
 
 # Where the dashboard image lives (from the GitHub Pages setup).
-DASH_URL="https://YOUR-GITHUB-USERNAME.github.io/kindle-dash/dash-daeaa084d03ce8b4.png"
+DASH_URL="https://matty-doop.github.io/kindle-dash/dash-daeaa084d03ce8b4.png"
 
 # Optional but recommended: lets the dashboard rejoin Wi-Fi by itself if the
 # Kindle drops its saved network after waking from sleep. 2.4 GHz network only.
