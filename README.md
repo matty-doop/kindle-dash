@@ -10,8 +10,10 @@ Weather + Google Calendar on a jailbroken Kindle Paperwhite 4 (1072×1448).
 ## Setup
 
 1. **Secrets** (Settings → Secrets and variables → Actions → *Secrets*):
-   - `CAL_ICS_URLS`: Google Calendar → calendar settings → *Secret address in iCal format*.
-     Several calendars: separate the links with commas.
+   - `CAL_ICS_URLS`: one or more calendar ICS links, separated by commas. Optionally put a
+     short label and `|` in front of each to tag its events, e.g. `M|https://…,J|https://…`.
+     - Google Calendar: calendar settings → *Secret address in iCal format*.
+     - Outlook.com / Hotmail: Settings → Calendar → Shared calendars → *Publish a calendar* → ICS link.
    - `DASH_NAME`: the image file name (an unguessable string; the Pages site is public).
 2. Optional **variables** (same page, *Variables* tab): `LAT`, `LON` (default State College, PA).
 3. **Pages**: Settings → Pages → Source: *GitHub Actions*.

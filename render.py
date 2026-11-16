@@ -2,8 +2,9 @@
 """Render a weather + calendar dashboard PNG for a Kindle Paperwhite 4 (1072x1448).
 
 Config (environment variables):
-  CAL_ICS_URLS   One or more Google Calendar "secret address in iCal format" URLs,
-                 separated by commas or newlines.
+  CAL_ICS_URLS   One or more calendar iCal (ICS) links, separated by commas or
+                 newlines. Prefix a link with a short label and "|" to tag its
+                 events on screen, e.g.  M|https://...ics, J|https://...ics
   LAT, LON       Location for weather (default: State College, PA).
   TZ_NAME        Time zone (default: America/New_York).
   OUT            Output path (default: out/dashboard.png).
@@ -73,7 +74,10 @@ def fetch_events(now, days=7):
     start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     end = start + dt.timedelta(days=days)
     events = []
-    for url in urls:
+    for entry in urls:
+        label, _, url = entry.rpartition("|") if "|" in entry else ("", "", entry)
+        label = label.strip()
+        url = url.strip().replace("webcal://", "https://", 1)
         r = requests.get(url, timeout=30)
         r.raise_for_status()
         cal = icalendar.Calendar.from_ical(r.content)
@@ -94,7 +98,7 @@ def fetch_events(now, days=7):
                 d = s
                 while d < e:
                     if start.date() <= d < end.date():
-                        events.append({"date": d, "start": None, "end": None,
+                        events.append({"date": d, "start": None, "end": None, "label": label,
                                        "title": str(ev.get("SUMMARY", "(no title)"))})
                     d += dt.timedelta(days=1)
             else:
@@ -102,16 +106,20 @@ def fetch_events(now, days=7):
                 e = (e.astimezone(TZ) if e and e.tzinfo else e.replace(tzinfo=TZ)) if e else s
                 if e <= now:          # already finished
                     continue
-                events.append({"date": max(s.date(), start.date()), "start": s, "end": e,
+                events.append({"date": max(s.date(), start.date()), "start": s, "end": e, "label": label,
                                "title": str(ev.get("SUMMARY", "(no title)"))})
     # de-duplicate (same event on two shared calendars)
-    seen, out = set(), []
+    seen, out = {}, []
     for ev in sorted(events, key=lambda x: (x["date"], x["start"] is not None,
                                             x["start"] or dt.datetime.min.replace(tzinfo=TZ))):
-        key = (ev["date"], ev["start"], ev["title"])
-        if key not in seen:
-            seen.add(key)
-            out.append(ev)
+        key = (ev["date"], ev["start"], ev["title"].strip().lower())
+        if key in seen:   # same event on two calendars: show it once, with both labels
+            first = seen[key]
+            if ev["label"] and ev["label"] not in first["label"]:
+                first["label"] = (first["label"] + ev["label"]) if first["label"] else ev["label"]
+            continue
+        seen[key] = ev
+        out.append(ev)
     return out
 
 
@@ -327,7 +335,14 @@ def render(now, wx, events, errors):
                 happening = ev["start"] <= now < ev["end"]
                 t = "Now" if happening else fmt_time(ev["start"])
                 d.text((M, y), t, font=time_f, fill=BLACK)
-            d.text((M + time_col, y), fit(d, ev["title"], title_f, W - 2 * M - time_col), font=title_f, fill=BLACK)
+            tx = M + time_col
+            if ev.get("label"):
+                bf = font("Bold", 22)
+                bw = max(36, d.textlength(ev["label"], font=bf) + 18)
+                d.rounded_rectangle([tx, y + 6, tx + bw, y + 40], radius=17, outline=BLACK, width=3)
+                d.text((tx + bw / 2, y + 23), ev["label"], font=bf, fill=BLACK, anchor="mm")
+                tx += bw + 14
+            d.text((tx, y), fit(d, ev["title"], title_f, W - M - tx), font=title_f, fill=BLACK)
             y += 50
         y += 16
 
@@ -363,12 +378,12 @@ def mock(now):
     }
     t = lambda dd, h, m=0: dt.datetime.combine(now.date() + dt.timedelta(days=dd), dt.time(h, m), TZ)
     events = [
-        {"date": now.date(), "start": None, "end": None, "title": "Trash & recycling"},
-        {"date": now.date(), "start": t(0, 16), "end": t(0, 17), "title": "Piano lesson"},
-        {"date": now.date(), "start": t(0, 18, 30), "end": t(0, 20), "title": "Dinner with the Hendersons"},
-        {"date": now.date() + dt.timedelta(days=1), "start": t(1, 8), "end": t(1, 9), "title": "Dentist – Dr. Patel"},
-        {"date": now.date() + dt.timedelta(days=1), "start": t(1, 15, 15), "end": t(1, 16), "title": "Early dismissal"},
-        {"date": now.date() + dt.timedelta(days=2), "start": t(2, 19), "end": t(2, 21), "title": "School board meeting"},
+        {"date": now.date(), "start": None, "end": None, "title": "Trash & recycling", "label": "MJ"},
+        {"date": now.date(), "start": t(0, 16), "end": t(0, 17), "title": "Piano lesson", "label": "J"},
+        {"date": now.date(), "start": t(0, 18, 30), "end": t(0, 20), "title": "Dinner with the Hendersons", "label": "MJ"},
+        {"date": now.date() + dt.timedelta(days=1), "start": t(1, 8), "end": t(1, 9), "title": "Dentist – Dr. Patel", "label": "M"},
+        {"date": now.date() + dt.timedelta(days=1), "start": t(1, 15, 15), "end": t(1, 16), "title": "Early dismissal", "label": "J"},
+        {"date": now.date() + dt.timedelta(days=2), "start": t(2, 19), "end": t(2, 21), "title": "School board meeting", "label": "M"},
         {"date": now.date() + dt.timedelta(days=4), "start": None, "end": None, "title": "Thanksgiving break begins"},
         {"date": now.date() + dt.timedelta(days=4), "start": t(4, 10), "end": t(4, 11), "title": "Flight to Atlanta"},
     ]
