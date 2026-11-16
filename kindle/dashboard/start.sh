@@ -19,9 +19,14 @@ if [ -f "$DIR/DISABLE" ]; then
   exit 0
 fi
 
+# Strip Windows line endings (Notepad) so values like DASH_URL don't end in \r.
 set -a
-[ -f "$DIR/config.sh" ] && . "$DIR/config.sh"
+if [ -f "$DIR/config.sh" ]; then
+  tr -d '\r' < "$DIR/config.sh" > /tmp/dashboard-config.sh
+  . /tmp/dashboard-config.sh
+fi
 set +a
+echo "$(date) start: url=$DASH_URL ssid=${WIFI_SSID:-none}" >> "$LOG"
 
 if [ -z "$DASH_URL" ]; then
   /usr/sbin/eips 2 30 "Set DASH_URL in dashboard/config.sh" >/dev/null 2>&1
