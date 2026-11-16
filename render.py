@@ -50,6 +50,19 @@ WMO = {  # code -> (label, icon)
 
 
 def fetch_weather():
+    import time
+    last = None
+    for attempt in range(4):          # the free API sometimes rejects shared CI IPs; retry
+        try:
+            return _fetch_weather_once()
+        except Exception as e:
+            last = e
+            print(f"weather attempt {attempt + 1} failed: {e}", file=sys.stderr)
+            time.sleep(5 * (attempt + 1))
+    raise last
+
+
+def _fetch_weather_once():
     import requests
     r = requests.get("https://api.open-meteo.com/v1/forecast", timeout=20, params={
         "latitude": LAT, "longitude": LON, "timezone": str(TZ),
