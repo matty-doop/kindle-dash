@@ -14,6 +14,11 @@ Config (environment variables):
 Countdowns: start a calendar event's title with "*" (e.g. "*Thanksgiving") and it
 gets a countdown chip until the day arrives.
 
+Besides OUT, each run also writes one frame per hour for the next 24 hours
+(<OUT stem>-YYYYMMDDHH.png), each drawn as the dashboard should look at that
+hour. The Kindle shows the frame for the current hour, so the hourly strip,
+"Today" and finished events stay correct even when runs are hours apart.
+
 Run with --mock to render sample data without network access.
 """
 import datetime as dt
@@ -447,10 +452,38 @@ def draw_alerts(d, alerts, y):
     return top + 64
 
 
-def render(now, wx, events, errors, note="", alerts=()):
+def wx_at(wx, now, fetched):
+    """Weather as it should read at a later time `now`, from data fetched earlier:
+    "current" comes from the hourly forecast and the daily rows shift to now's date."""
+    if not wx or now - fetched < dt.timedelta(minutes=50):
+        return wx
+    hourly, daily = wx["hourly"], wx["daily"]
+    key = now.strftime("%Y-%m-%dT%H:00")
+    if key not in hourly["time"]:
+        return None
+    i = hourly["time"].index(key)
+    k = daily["time"].index(now.date().isoformat()) if now.date().isoformat() in daily["time"] else None
+    if k is None:
+        return None
+    temp = hourly["temperature_2m"][i]
+    feels = temp
+    wind = wx["current"].get("wind_speed_10m", 0)
+    if temp <= 50 and wind > 3:      # keep the current wind; wind chill from forecast temp
+        v = wind ** 0.16
+        feels = 35.74 + 0.6215 * temp - 35.75 * v + 0.4275 * temp * v
+    cur = {"temperature_2m": temp, "apparent_temperature": feels, "weather_code": hourly["weather_code"][i],
+           "wind_speed_10m": wind, "is_day": (hourly.get("is_day") or [1] * len(hourly["time"]))[i]}
+    return {"current": cur, "hourly": hourly,
+            "daily": {name: vals[k:] for name, vals in daily.items()}}
+
+
+def render(now, wx, events, errors, note="", alerts=(), updated=None):
     img = Image.new("L", (W, H), WHITE)
     d = ImageDraw.Draw(img)
     today = now.date()
+    updated = updated or now
+    events = [ev for ev in events if ev["start"] is None or ev["end"] > now]
+    alerts = [a for a in alerts if not a.get("until") or a["until"] > now]
 
     # Header -------------------------------------------------------------
     d.text((M, 40), now.strftime("%A"), font=font("Bold", 84), fill=BLACK)
@@ -506,7 +539,7 @@ def render(now, wx, events, errors, note="", alerts=()):
         d.line([M, y, W - M, y], fill=LIGHT, width=2)
         y += 20
         colw = (W - 2 * M) / 4
-        for k in range(1, 5):
+        for k in range(1, min(5, len(daily["time"]))):
             cx = M + colw * (k - 1) + colw / 2
             day = dt.date.fromisoformat(daily["time"][k])
             d.text((cx, y), day.strftime("%a"), font=font("Bold", 34), fill=DARK, anchor="ma")
@@ -611,7 +644,7 @@ def render(now, wx, events, errors, note="", alerts=()):
 
     # Footer ---------------------------------------------------------------
     d.line([M, footer_top, W - M, footer_top], fill=LIGHT, width=2)
-    stamp = f"Updated {now.strftime('%a')} {fmt_time(now)}" + (f"  ·  {note}" if note else "")
+    stamp = f"Updated {updated.strftime('%a')} {fmt_time(updated)}" + (f"  ·  {note}" if note else "")
     if errors:
         stamp += "  ·  " + " / ".join(errors)
     d.text((M, footer_top + 18), fit(d, stamp, font("Medium", 28), W - 2 * M - 250), font=font("Medium", 28), fill=MID)
@@ -685,10 +718,19 @@ def main():
         except Exception as e:
             print("calendar error:", e, file=sys.stderr)
             events, errors = [], errors + ["calendar failed"]
-    img = render(now, wx, events, errors, note, alerts)
     out.parent.mkdir(parents=True, exist_ok=True)
-    img.save(out, optimize=True)
+    render(now, wx, events, errors, note, alerts).save(out, optimize=True)
     print("wrote", out)
+
+    # One frame per hour for the next 24 hours.
+    top = now.replace(minute=0, second=0, microsecond=0)
+    for h in range(25):
+        t = now if h == 0 else top + dt.timedelta(hours=h, minutes=1)
+        fwx = wx_at(wx, t, now)
+        ferr = errors + (["weather failed"] if wx and not fwx and "weather failed" not in errors else [])
+        img = render(t, fwx, events, ferr, note, alerts, updated=now)
+        img.save(out.with_name(f"{out.stem}-{t.strftime('%Y%m%d%H')}.png"), optimize=True)
+    print("wrote 25 hourly frames")
 
 
 if __name__ == "__main__":

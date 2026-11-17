@@ -451,17 +451,25 @@ show_error() {
   log "error screen: $kind (code=$code)"
 }
 
-poll() {
+# The renderer publishes one frame per hour (<name>-YYYYMMDDHH.png) for the
+# next 24 hours. Ask for this hour's frame; if it doesn't exist (the renderer
+# hasn't run for over a day), fall back to the plain image.
+fetch() {
   if [ "$state" = "ok" ]; then
     # Healthy: conditional GET (304 when unchanged).
-    code=$(curl -s -o "${PNG}.tmp" -w "%{http_code}" --max-time "$CURL_TIMEOUT" \
-           --etag-compare "$ETAG" --etag-save "$ETAG" "$URL" 2>/dev/null)
+    curl -s -o "${PNG}.tmp" -w "%{http_code}" --max-time "$CURL_TIMEOUT" \
+         --etag-compare "$ETAG" --etag-save "$ETAG" "$1" 2>/dev/null
   else
     # Showing an error: force an unconditional GET so recovery always returns a
     # body to draw (a conditional 304 would otherwise strand us on the error).
-    code=$(curl -s -o "${PNG}.tmp" -w "%{http_code}" --max-time "$CURL_TIMEOUT" \
-           --etag-save "$ETAG" "$URL" 2>/dev/null)
+    curl -s -o "${PNG}.tmp" -w "%{http_code}" --max-time "$CURL_TIMEOUT" \
+         --etag-save "$ETAG" "$1" 2>/dev/null
   fi
+}
+
+poll() {
+  code=$(fetch "${URL%.png}-$(date +%Y%m%d%H).png")
+  [ "$code" = "404" ] && code=$(fetch "$URL")
 
   if [ "$code" = "200" ] && [ -s "${PNG}.tmp" ]; then
     mv "${PNG}.tmp" "$PNG"
