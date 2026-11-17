@@ -15,7 +15,7 @@ Weather + Google Calendar on a jailbroken Kindle Paperwhite 4 (1072×1448).
      - Google Calendar: calendar settings → *Secret address in iCal format*.
      - Outlook.com / Hotmail: Settings → Calendar → Shared calendars → *Publish a calendar* → ICS link.
    - `DASH_NAME`: the image file name (an unguessable string; the Pages site is public).
-2. Optional **variables** (same page, *Variables* tab): `LAT`, `LON` (default State College, PA).
+2. Optional **variables** (same page, *Variables* tab): `LAT`, `LON` (default Grays Woods, Patton Township, PA).
 3. **Pages**: Settings → Pages → Source: *GitHub Actions*.
 4. Actions tab → *Render dashboard* → *Run workflow*. The image appears at
    `https://<user>.github.io/<repo>/<DASH_NAME>.png`.

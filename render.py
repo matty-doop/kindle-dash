@@ -5,7 +5,7 @@ Config (environment variables):
   CAL_ICS_URLS   One or more calendar iCal (ICS) links, separated by commas or
                  newlines. Prefix a link with a short label and "|" to tag its
                  events on screen, e.g.  M|https://...ics, J|https://...ics
-  LAT, LON       Location for weather (default: State College, PA).
+  LAT, LON       Location for weather (default: Grays Woods, Patton Township, PA).
   TZ_NAME        Time zone (default: America/New_York).
   OUT            Output path (default: out/dashboard.png).
 
@@ -27,8 +27,8 @@ M = 56                      # outer margin
 BLACK, DARK, MID, LIGHT, WHITE = 0, 60, 120, 200, 255
 
 TZ = ZoneInfo(os.environ.get("TZ_NAME") or "America/New_York")
-LAT = float(os.environ.get("LAT") or "40.7934")
-LON = float(os.environ.get("LON") or "-77.8600")
+LAT = float(os.environ.get("LAT") or "40.8072")
+LON = float(os.environ.get("LON") or "-77.9486")
 FONT_DIR = Path(__file__).parent / "fonts"
 
 
