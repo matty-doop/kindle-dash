@@ -5,6 +5,8 @@ Config (environment variables):
   CAL_ICS_URLS   One or more calendar iCal (ICS) links, separated by commas or
                  newlines. Prefix a link with a short label and "|" to tag its
                  events on screen, e.g.  M|https://...ics, J|https://...ics
+  HOLIDAYS       US holidays on the calendar: "all" (default), "public" (federal
+                 holidays only, no observances like Valentine's Day) or "off".
   LAT, LON       Location for weather (default: Grays Woods, Patton Township, PA).
   TZ_NAME        Time zone (default: America/New_York).
   OUT            Output path (default: out/dashboard.png).
@@ -229,6 +231,10 @@ def moon_phase(day):
 
 # --------------------------------------------------------------- calendar
 
+HOLIDAY_ICS = ("https://calendar.google.com/calendar/ical/"
+               "en.usa%23holiday%40group.v.calendar.google.com/public/basic.ics")
+
+
 def fetch_events(now, days=180):
     import requests
     import icalendar
@@ -238,15 +244,27 @@ def fetch_events(now, days=180):
     start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     end = start + dt.timedelta(days=days)
     events = []
-    for entry in urls:
+    feeds = [(u, False) for u in urls]
+    hol = (os.environ.get("HOLIDAYS") or "all").strip().lower()
+    if hol != "off":
+        feeds.append((HOLIDAY_ICS, True))
+    for entry, is_holiday in feeds:
         label, _, url = entry.rpartition("|") if "|" in entry else ("", "", entry)
         label = label.strip()
         url = url.strip().replace("webcal://", "https://", 1)
-        r = requests.get(url, timeout=30)
-        r.raise_for_status()
+        try:
+            r = requests.get(url, timeout=30)
+            r.raise_for_status()
+        except Exception as e:
+            if is_holiday:            # holidays are a bonus; never fail the calendar for them
+                print("holidays error:", e, file=sys.stderr)
+                continue
+            raise
         cal = icalendar.Calendar.from_ical(r.content)
         for ev in recurring_ical_events.of(cal).between(start, end):
             if str(ev.get("STATUS", "")).upper() == "CANCELLED":
+                continue
+            if is_holiday and hol == "public" and "public holiday" not in str(ev.get("DESCRIPTION", "")).lower():
                 continue
             s = ev["DTSTART"].dt
             if ev.get("DTEND"):
@@ -263,7 +281,8 @@ def fetch_events(now, days=180):
                 while d < e:
                     if start.date() <= d < end.date():
                         events.append({"date": d, "start": None, "end": None, "label": label,
-                                       "title": str(ev.get("SUMMARY", "(no title)")), "first_day": d == s})
+                                       "title": str(ev.get("SUMMARY", "(no title)")), "first_day": d == s,
+                                       "holiday": is_holiday})
                     d += dt.timedelta(days=1)
             else:
                 s = s.astimezone(TZ) if s.tzinfo else s.replace(tzinfo=TZ)
@@ -271,7 +290,8 @@ def fetch_events(now, days=180):
                 if e <= now:          # already finished
                     continue
                 events.append({"date": max(s.date(), start.date()), "start": s, "end": e, "label": label,
-                               "title": str(ev.get("SUMMARY", "(no title)")), "first_day": True})
+                               "title": str(ev.get("SUMMARY", "(no title)")), "first_day": True,
+                               "holiday": is_holiday})
     # "*Title" marks a countdown event; strip the marker for display
     for ev in events:
         t = ev["title"].strip()
@@ -284,12 +304,16 @@ def fetch_events(now, days=180):
         key = (ev["date"], ev["start"], ev["title"].strip().lower())
         if key in seen:   # same event on two calendars: show it once, with both labels
             first = seen[key]
+            if ev.get("holiday") or first.get("holiday"):
+                first["holiday"] = first.get("holiday") and ev.get("holiday")
+                first["label"] = first["label"] if not first.get("holiday") else ev["label"]
+                continue
             if ev["label"] and ev["label"] not in first["label"]:
                 first["label"] = (first["label"] + ev["label"]) if first["label"] else ev["label"]
             continue
         seen[key] = ev
         out.append(ev)
-    print(f"calendars: {len(urls)}, events: {len(out)}")
+    print(f"calendars: {len(urls)}, events: {len(out)}, holidays: {sum(1 for e in out if e.get('holiday'))}")
     return out, len(urls)
 
 
@@ -388,11 +412,16 @@ def fit(d, text, f, maxw):
 
 
 def day_label(day, today):
-    if day == today:
-        return "Today"
-    if day == today + dt.timedelta(days=1):
-        return "Tomorrow"
-    return day.strftime("%A")
+    """(heading, gray suffix) for an agenda day."""
+    n = (day - today).days
+    md = day.strftime("%b ") + str(day.day)
+    if n == 0:
+        return "Today", ""
+    if n == 1:
+        return "Tomorrow", md
+    if n < 7:
+        return day.strftime("%A"), md
+    return day.strftime("%a, ") + md, f"in {n} days"
 
 
 # ------------------------------------------------------------------- render
@@ -517,7 +546,6 @@ def render(now, wx, events, errors, note="", alerts=()):
         y += 94
 
     # Calendar -------------------------------------------------------------
-    events = [ev for ev in events if ev["date"] < today + dt.timedelta(days=7)]
     d.line([M, y, W - M, y], fill=BLACK, width=3)
     y += 26
     footer_top = H - 74
@@ -530,28 +558,33 @@ def render(now, wx, events, errors, note="", alerts=()):
         by_day.setdefault(ev["date"], []).append(ev)
     days = [today, today + dt.timedelta(days=1)] + sorted(k for k in by_day if k > today + dt.timedelta(days=1))
 
-    hidden = 0
+    # Today and tomorrow always show; after that, the next days that have
+    # anything on them, however far out, until the screen is full.
+    week_end = today + dt.timedelta(days=7)
+    hidden, full = 0, False
     for day in days:
         evs = by_day.get(day, [])
         if day > today + dt.timedelta(days=1) and not evs:
             continue
-        need = 64 + max(len(evs), 1) * row
-        if y + min(need, 64 + row) > footer_top:
-            hidden += len(evs)
+        if full or y + 64 + row > footer_top:
+            full = True
+            hidden += len(evs) if day < week_end else 0
             continue
-        label = day_label(day, today)
+        label, suffix = day_label(day, today)
         d.text((M, y), label, font=head_f, fill=BLACK)
-        if day > today + dt.timedelta(days=1) or day == today + dt.timedelta(days=1):
-            d.text((M + d.textlength(label, font=head_f) + 18, y + 10), day.strftime("%b ") + str(day.day),
+        if not evs:   # empty today/tomorrow: one compact line
+            sx = M + d.textlength(label, font=head_f) + 22
+            d.text((sx, y + 8), "Nothing scheduled", font=font("Medium", 36), fill=MID)
+            y += 64 + 6
+            continue
+        if suffix:
+            d.text((M + d.textlength(label, font=head_f) + 18, y + 10), suffix,
                    font=font("SemiBold", 32), fill=MID)
         y += 64
-        if not evs:
-            d.text((M + time_col, y), "Nothing scheduled", font=font("Medium", 36), fill=MID)
-            y += row + 4
-            continue
         for ev in evs:
             if y + row > footer_top:
-                hidden += 1
+                full = True
+                hidden += 1 if day < week_end else 0
                 continue
             if ev["start"] is None:
                 d.rounded_rectangle([M, y + 4, M + time_col - 30, y + 48], radius=8, fill=BLACK)
@@ -561,6 +594,8 @@ def render(now, wx, events, errors, note="", alerts=()):
                 t = "Now" if happening else fmt_time(ev["start"])
                 d.text((M, y), t, font=time_f, fill=BLACK)
             tx = M + time_col
+            if ev.get("holiday") and not ev.get("label"):
+                ev["label"] = "US"
             if ev.get("label"):
                 bf = font("Bold", 26)
                 bw = max(44, d.textlength(ev["label"], font=bf) + 22)
@@ -615,6 +650,10 @@ def mock(now):
         {"date": now.date() + dt.timedelta(days=4), "start": t(4, 10), "end": t(4, 11), "title": "Flight to Atlanta"},
         {"date": now.date() + dt.timedelta(days=10), "start": None, "end": None, "title": "Thanksgiving",
          "countdown": True},
+        {"date": now.date() + dt.timedelta(days=10), "start": None, "end": None, "title": "Thanksgiving Day",
+         "holiday": True},
+        {"date": now.date() + dt.timedelta(days=17), "start": t(17, 9, 30), "end": t(17, 10, 30),
+         "title": "Eye doctor", "label": "M"},
         {"date": now.date() + dt.timedelta(days=39), "start": None, "end": None, "title": "Christmas",
          "countdown": True},
     ]

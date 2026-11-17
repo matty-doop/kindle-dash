@@ -25,6 +25,7 @@ Weather + Google Calendar on a jailbroken Kindle Paperwhite 4 (1072×1448).
 **Extras:**
 - Weather alerts from the National Weather Service appear as a banner when active.
 - Start a calendar event's title with `*` (e.g. `*Thanksgiving`) to get a countdown chip.
+- US holidays appear automatically (`HOLIDAYS` variable: `all`, `public` or `off`).
 - Sunrise, sunset and moon phase sit under the date.
 - The Kindle draws its own battery level bottom-right (`SHOW_BATTERY=0` in config.sh to hide).
 
