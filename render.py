@@ -53,21 +53,136 @@ WMO = {  # code -> (label, icon)
 
 
 def fetch_weather():
+    """Open-Meteo first; if it's unreachable (it sometimes times out from GitHub's
+    servers), fall back to the National Weather Service."""
     import time
-    last = None
-    for attempt in range(4):          # the free API sometimes rejects shared CI IPs; retry
+    for attempt in range(2):
         try:
-            return _fetch_weather_once()
+            wx = _fetch_weather_once()
+            print("weather: open-meteo")
+            return wx
         except Exception as e:
-            last = e
-            print(f"weather attempt {attempt + 1} failed: {e}", file=sys.stderr)
-            time.sleep(5 * (attempt + 1))
-    raise last
+            print(f"open-meteo attempt {attempt + 1} failed: {e}", file=sys.stderr)
+            time.sleep(3)
+    wx = _fetch_weather_nws()
+    print("weather: nws fallback")
+    return wx
+
+
+def _nws_code(text):
+    """Map an NWS shortForecast phrase to the nearest WMO weather code."""
+    t = text.lower()
+    light = "light" in t or "chance" in t or "slight" in t
+    if "thunder" in t:
+        return 95
+    if any(k in t for k in ("freezing", "sleet", "ice", "wintry")):
+        return 66
+    if "snow" in t or "flurr" in t:
+        return 71 if light else 73
+    if "drizzle" in t:
+        return 51
+    if "rain" in t or "shower" in t:
+        return 61 if light else 63
+    if "fog" in t or "haze" in t:
+        return 45
+    if "partly" in t:
+        return 2
+    if "mostly sunny" in t or "mostly clear" in t:
+        return 1
+    if "cloud" in t or "overcast" in t:
+        return 3
+    return 0
+
+
+def _sun_times(day):
+    """Sunrise/sunset (local ISO strings) from the NOAA approximation, or None."""
+    import math
+    n = day.timetuple().tm_yday
+    g = 2 * math.pi / 365 * (n - 1)
+    eqt = 229.18 * (0.000075 + 0.001868 * math.cos(g) - 0.032077 * math.sin(g)
+                    - 0.014615 * math.cos(2 * g) - 0.040849 * math.sin(2 * g))
+    dec = (0.006918 - 0.399912 * math.cos(g) + 0.070257 * math.sin(g) - 0.006758 * math.cos(2 * g)
+           + 0.000907 * math.sin(2 * g) - 0.002697 * math.cos(3 * g) + 0.00148 * math.sin(3 * g))
+    lat = math.radians(LAT)
+    x = math.cos(math.radians(90.833)) / (math.cos(lat) * math.cos(dec)) - math.tan(lat) * math.tan(dec)
+    if not -1 <= x <= 1:
+        return None
+    ha = math.degrees(math.acos(x))
+    out = []
+    for sign in (1, -1):
+        minutes = 720 - 4 * (LON + sign * ha) - eqt        # minutes after 00:00 UTC
+        t = dt.datetime.combine(day, dt.time(0), dt.timezone.utc) + dt.timedelta(minutes=minutes)
+        out.append(t.astimezone(TZ).strftime("%Y-%m-%dT%H:%M"))
+    return out
+
+
+def _fetch_weather_nws():
+    """Build the same structure Open-Meteo returns from the NWS hourly forecast."""
+    import requests
+    from collections import Counter
+    hdr = {"User-Agent": "kindle-dash (github.com/matty-doop/kindle-dash)", "Accept": "application/geo+json"}
+    pt = requests.get(f"https://api.weather.gov/points/{LAT:.4f},{LON:.4f}", timeout=20, headers=hdr)
+    pt.raise_for_status()
+    r = requests.get(pt.json()["properties"]["forecastHourly"], timeout=30, headers=hdr)
+    r.raise_for_status()
+    return _nws_to_wx(r.json()["properties"]["periods"])
+
+
+def _nws_to_wx(periods):
+    from collections import Counter
+    rows = []
+    for p in periods:
+        t = dt.datetime.fromisoformat(p["startTime"]).astimezone(TZ)
+        try:
+            wind = float(str(p.get("windSpeed", "0")).split()[0])
+        except ValueError:
+            wind = 0.0
+        rows.append({"t": t, "temp": float(p["temperature"]), "wind": wind,
+                     "pop": int((p.get("probabilityOfPrecipitation") or {}).get("value") or 0),
+                     "code": _nws_code(p.get("shortForecast", "")), "day": 1 if p.get("isDaytime") else 0})
+    if not rows:
+        raise RuntimeError("NWS returned no forecast periods")
+    c = rows[0]
+    feels = c["temp"]
+    if c["temp"] <= 50 and c["wind"] > 3:     # wind chill
+        v = c["wind"] ** 0.16
+        feels = 35.74 + 0.6215 * c["temp"] - 35.75 * v + 0.4275 * c["temp"] * v
+    by_day = {}
+    for x in rows:
+        by_day.setdefault(x["t"].date(), []).append(x)
+    days = sorted(by_day)[:6]
+    daily = {"time": [], "weather_code": [], "temperature_2m_max": [], "temperature_2m_min": [],
+             "precipitation_probability_max": [], "sunrise": [], "sunset": []}
+    for dday in days:
+        xs = by_day[dday]
+        lit = [x for x in xs if x["day"]] or xs
+        wet = [x["code"] for x in lit if x["code"] >= 51 and x["pop"] >= 40]
+        code = Counter(wet or [x["code"] for x in lit]).most_common(1)[0][0]
+        daily["time"].append(dday.isoformat())
+        daily["weather_code"].append(code)
+        daily["temperature_2m_max"].append(max(x["temp"] for x in xs))
+        daily["temperature_2m_min"].append(min(x["temp"] for x in xs))
+        daily["precipitation_probability_max"].append(max(x["pop"] for x in xs))
+        sun = _sun_times(dday)
+        if sun:
+            daily["sunrise"].append(sun[0])
+            daily["sunset"].append(sun[1])
+    if len(daily["sunrise"]) != len(days):
+        daily.pop("sunrise"), daily.pop("sunset")
+    return {
+        "current": {"temperature_2m": c["temp"], "apparent_temperature": feels, "weather_code": c["code"],
+                    "wind_speed_10m": c["wind"], "is_day": c["day"]},
+        "hourly": {"time": [x["t"].strftime("%Y-%m-%dT%H:%M") for x in rows],
+                   "temperature_2m": [x["temp"] for x in rows],
+                   "precipitation_probability": [x["pop"] for x in rows],
+                   "weather_code": [x["code"] for x in rows], "is_day": [x["day"] for x in rows]},
+        "daily": daily,
+    }
 
 
 def _fetch_weather_once():
     import requests
-    r = requests.get("https://api.open-meteo.com/v1/forecast", timeout=20, params={
+    r = requests.get("https://api.open-meteo.com/v1/forecast", timeout=12, params={
         "latitude": LAT, "longitude": LON, "timezone": str(TZ),
         "temperature_unit": "fahrenheit", "wind_speed_unit": "mph",
         "current": "temperature_2m,apparent_temperature,weather_code,wind_speed_10m,is_day",
