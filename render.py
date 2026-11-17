@@ -699,15 +699,29 @@ def main():
     now = dt.datetime.now(TZ)
     out = Path(os.environ.get("OUT", "out/dashboard.png"))
     errors, note, alerts = [], "", []
+    wx_time = now
     if "--mock" in sys.argv:
         wx, events, alerts = mock(now)
         note = "2 calendars"
     else:
+        import json
+        cache = Path(os.environ.get("WX_CACHE", "wx-cache.json"))
         try:
             wx = fetch_weather()
-        except Exception as e:  # keep rendering with what we have
+            cache.write_text(json.dumps({"fetched": now.isoformat(), "wx": wx}))
+        except Exception as e:  # fall back to the last good forecast, if recent
             print("weather error:", e, file=sys.stderr)
-            wx, errors = None, errors + ["weather failed"]
+            wx = None
+            try:
+                c = json.loads(cache.read_text())
+                got = dt.datetime.fromisoformat(c["fetched"])
+                if now - got < dt.timedelta(hours=36):
+                    wx, wx_time = c["wx"], got
+                    print(f"weather: cached from {got}")
+            except Exception as ce:
+                print("no weather cache:", ce, file=sys.stderr)
+            if not wx:
+                errors = errors + ["weather failed"]
         try:
             alerts = fetch_alerts()
         except Exception as e:  # alerts are a bonus; never block the render
@@ -719,14 +733,14 @@ def main():
             print("calendar error:", e, file=sys.stderr)
             events, errors = [], errors + ["calendar failed"]
     out.parent.mkdir(parents=True, exist_ok=True)
-    render(now, wx, events, errors, note, alerts).save(out, optimize=True)
+    render(now, wx_at(wx, now, wx_time), events, errors, note, alerts).save(out, optimize=True)
     print("wrote", out)
 
     # One frame per hour for the next 24 hours.
     top = now.replace(minute=0, second=0, microsecond=0)
     for h in range(25):
         t = now if h == 0 else top + dt.timedelta(hours=h, minutes=1)
-        fwx = wx_at(wx, t, now)
+        fwx = wx_at(wx, t, wx_time)
         ferr = errors + (["weather failed"] if wx and not fwx and "weather failed" not in errors else [])
         img = render(t, fwx, events, ferr, note, alerts, updated=now)
         img.save(out.with_name(f"{out.stem}-{t.strftime('%Y%m%d%H')}.png"), optimize=True)

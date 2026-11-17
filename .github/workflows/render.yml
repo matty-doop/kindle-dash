@@ -30,6 +30,13 @@ jobs:
 
       - run: pip install -r requirements.txt
 
+      # Last good forecast, reused if both weather services are down.
+      - uses: actions/cache@v4
+        with:
+          path: wx-cache.json
+          key: wx-${{ github.run_id }}
+          restore-keys: wx-
+
       - name: Render
         env:
           CAL_ICS_URLS: ${{ secrets.CAL_ICS_URLS }}
