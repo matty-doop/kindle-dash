@@ -432,7 +432,7 @@ draw_battery() {
     *)        txt="Battery ${bcap}%" ;;
   esac
   [ "$1" != force ] && [ "$txt" = "$batt_drawn" ] && return 0
-  "$FBINK" -q -C GRAY7 -t regular="$BATT_FONT",px=24,top=1394,bottom=10,left=-262,right=56,padding=BOTH \
+  "$FBINK" -q -C GRAY4 -t regular="$BATT_FONT",px=28,top=1392,bottom=8,left=-300,right=56,padding=BOTH \
     "$txt" >/dev/null 2>&1 && batt_drawn=$txt
 }
 

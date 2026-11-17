@@ -24,7 +24,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 W, H = 1072, 1448
 M = 56                      # outer margin
-BLACK, DARK, MID, LIGHT, WHITE = 0, 60, 120, 200, 255
+BLACK, DARK, MID, LIGHT, WHITE = 0, 25, 70, 170, 255
 
 TZ = ZoneInfo(os.environ.get("TZ_NAME") or "America/New_York")
 LAT = float(os.environ.get("LAT") or "40.8072")
@@ -287,9 +287,9 @@ def draw_alerts(d, alerts, y):
     if not alerts:
         return y
     top = y + 16
-    d.rounded_rectangle([M, top, W - M, top + 58], radius=10, fill=BLACK)
+    d.rounded_rectangle([M, top, W - M, top + 64], radius=10, fill=BLACK)
     # warning triangle
-    tx, ty = M + 34, top + 29
+    tx, ty = M + 34, top + 32
     d.polygon([(tx, ty - 17), (tx + 19, ty + 15), (tx - 19, ty + 15)], fill=WHITE)
     d.text((tx, ty + 3), "!", font=font("Bold", 24), fill=BLACK, anchor="mm")
     a = alerts[0]
@@ -298,9 +298,9 @@ def draw_alerts(d, alerts, y):
         text += f"  ·  until {a['until'].strftime('%a')} {fmt_time(a['until'])}"
     if len(alerts) > 1:
         text += f"  ·  +{len(alerts) - 1} more"
-    f = font("SemiBold", 28)
-    d.text((M + 70, top + 29), fit(d, text, f, W - 2 * M - 90), font=f, fill=WHITE, anchor="lm")
-    return top + 58
+    f = font("Bold", 32)
+    d.text((M + 70, top + 32), fit(d, text, f, W - 2 * M - 90), font=f, fill=WHITE, anchor="lm")
+    return top + 64
 
 
 def render(now, wx, events, errors, note="", alerts=()):
@@ -315,8 +315,8 @@ def render(now, wx, events, errors, note="", alerts=()):
     if wx and wx["daily"].get("sunrise"):
         rise = dt.datetime.fromisoformat(wx["daily"]["sunrise"][0])
         sset = dt.datetime.fromisoformat(wx["daily"]["sunset"][0])
-        sunline = f"Sunrise {fmt_time(rise)}  ·  Sunset {fmt_time(sset)}  ·  {sunline}"
-    d.text((M, 198), sunline, font=font("Medium", 25), fill=MID)
+        sunline = f"Rise {fmt_time(rise)}  ·  Set {fmt_time(sset)}  ·  {sunline}"
+    d.text((M, 196), fit(d, sunline, font("Medium", 28), 600), font=font("Medium", 28), fill=MID)
 
     # Current weather (top right) ---------------------------------------
     y = 236
@@ -328,35 +328,35 @@ def render(now, wx, events, errors, note="", alerts=()):
         tw = d.textlength(temp, font=font("Bold", 120))
         icon(d, kind, W - M - tw - 95, 125, 66)
         d.text((W - M, 60), temp, font=font("Bold", 120), fill=BLACK, anchor="ra")
-        d.text((W - M, 196), label, font=font("Medium", 30), fill=DARK, anchor="ra")
+        d.text((W - M, 192), label, font=font("SemiBold", 34), fill=DARK, anchor="ra")
 
         hi, lo = round(daily["temperature_2m_max"][0]), round(daily["temperature_2m_min"][0])
         pop = daily["precipitation_probability_max"][0]
-        summary = (f"High {hi}°  ·  Low {lo}°  ·  Feels like {round(cur['apparent_temperature'])}°"
+        summary = (f"High {hi}°  ·  Low {lo}°  ·  Feels {round(cur['apparent_temperature'])}°"
                    f"  ·  Wind {round(cur['wind_speed_10m'])} mph")
         if pop:
             summary += f"  ·  {pop}% rain"
         d.line([M, y, W - M, y], fill=BLACK, width=3)
         y = draw_alerts(d, alerts, y)
-        d.text((M, y + 22), fit(d, summary, font("Medium", 27), W - 2 * M), font=font("Medium", 27), fill=DARK)
-        y += 78
+        d.text((M, y + 20), fit(d, summary, font("SemiBold", 33), W - 2 * M), font=font("SemiBold", 33), fill=DARK)
+        y += 80
 
         # Hourly strip: next 6 slots, every 2 hours
         times = [dt.datetime.fromisoformat(t).replace(tzinfo=TZ) for t in wx["hourly"]["time"]]
         idx = next((i for i, t in enumerate(times) if t >= now.replace(minute=0, second=0, microsecond=0)), 0)
-        slots = [idx + 1 + 2 * k for k in range(6) if idx + 1 + 2 * k < len(times)]
+        slots = [idx + 1 + 2 * k for k in range(5) if idx + 1 + 2 * k < len(times)]
         colw = (W - 2 * M) / max(len(slots), 1)
         for k, i in enumerate(slots):
             cx = M + colw * k + colw / 2
-            d.text((cx, y + 8), fmt_time(times[i]), font=font("Medium", 26), fill=MID, anchor="ma")
+            d.text((cx, y + 6), fmt_time(times[i]), font=font("SemiBold", 32), fill=MID, anchor="ma")
             icon(d, icon_kind(wx["hourly"]["weather_code"][i], wx["hourly"].get("is_day", [1] * len(times))[i]),
-                 cx, y + 82, 30)
-            d.text((cx, y + 128), f"{round(wx['hourly']['temperature_2m'][i])}°", font=font("SemiBold", 34),
+                 cx, y + 86, 37)
+            d.text((cx, y + 132), f"{round(wx['hourly']['temperature_2m'][i])}°", font=font("Bold", 44),
                    fill=BLACK, anchor="ma")
             p = wx["hourly"]["precipitation_probability"][i]
             if p and p >= 20:
-                d.text((cx, y + 172), f"{p}%", font=font("Medium", 22), fill=MID, anchor="ma")
-        y += 214
+                d.text((cx, y + 184), f"{p}%", font=font("SemiBold", 28), fill=MID, anchor="ma")
+        y += 226
 
         # Next 4 days
         d.line([M, y, W - M, y], fill=LIGHT, width=2)
@@ -365,16 +365,16 @@ def render(now, wx, events, errors, note="", alerts=()):
         for k in range(1, 5):
             cx = M + colw * (k - 1) + colw / 2
             day = dt.date.fromisoformat(daily["time"][k])
-            d.text((cx, y), day.strftime("%a"), font=font("SemiBold", 28), fill=DARK, anchor="ma")
-            icon(d, icon_kind(daily["weather_code"][k]), cx, y + 76, 30)
-            d.text((cx, y + 122), f"{round(daily['temperature_2m_max'][k])}° / "
+            d.text((cx, y), day.strftime("%a"), font=font("Bold", 34), fill=DARK, anchor="ma")
+            icon(d, icon_kind(daily["weather_code"][k]), cx, y + 82, 37)
+            d.text((cx, y + 128), f"{round(daily['temperature_2m_max'][k])}° / "
                                   f"{round(daily['temperature_2m_min'][k])}°",
-                   font=font("Medium", 28), fill=BLACK, anchor="ma")
-        y += 176
+                   font=font("SemiBold", 34), fill=BLACK, anchor="ma")
+        y += 186
     else:
         d.line([M, y, W - M, y], fill=BLACK, width=3)
         y = draw_alerts(d, alerts, y)
-        d.text((M, y + 22), "Weather unavailable", font=font("Medium", 30), fill=MID)
+        d.text((M, y + 20), "Weather unavailable", font=font("SemiBold", 34), fill=MID)
         y += 80
 
     # Countdowns -----------------------------------------------------------
@@ -387,27 +387,28 @@ def render(now, wx, events, errors, note="", alerts=()):
     if counts:
         d.line([M, y, W - M, y], fill=LIGHT, width=2)
         x, cy = M, y + 18
-        nf, tf = font("Bold", 30), font("Medium", 28)
+        nf, tf = font("Bold", 34), font("SemiBold", 32)
         for ev in counts[:4]:
             n = (ev["date"] - today).days
             num = "Today" if n == 0 else "Tomorrow" if n == 1 else f"{n} days"
-            title = fit(d, ev["title"], tf, 330)
+            title = fit(d, ev["title"], tf, 360)
             wdt = d.textlength(num, font=nf) + 14 + d.textlength(title, font=tf) + 40
             if x + wdt > W - M:
                 break
-            d.rounded_rectangle([x, cy, x + wdt, cy + 52], radius=26, outline=BLACK, width=3)
-            d.text((x + 20, cy + 26), num, font=nf, fill=BLACK, anchor="lm")
-            d.text((x + 20 + d.textlength(num, font=nf) + 14, cy + 26), title, font=tf, fill=DARK, anchor="lm")
+            d.rounded_rectangle([x, cy, x + wdt, cy + 58], radius=29, outline=BLACK, width=3)
+            d.text((x + 20, cy + 29), num, font=nf, fill=BLACK, anchor="lm")
+            d.text((x + 20 + d.textlength(num, font=nf) + 14, cy + 29), title, font=tf, fill=DARK, anchor="lm")
             x += wdt + 16
-        y += 88
+        y += 94
 
     # Calendar -------------------------------------------------------------
     events = [ev for ev in events if ev["date"] < today + dt.timedelta(days=7)]
     d.line([M, y, W - M, y], fill=BLACK, width=3)
     y += 26
-    footer_top = H - 70
-    title_f, time_f, head_f = font("Medium", 34), font("SemiBold", 30), font("Bold", 36)
-    time_col = 190
+    footer_top = H - 74
+    title_f, time_f, head_f = font("SemiBold", 42), font("Bold", 38), font("Bold", 44)
+    time_col = 215
+    row = 60
 
     by_day = {}
     for ev in events:
@@ -419,51 +420,51 @@ def render(now, wx, events, errors, note="", alerts=()):
         evs = by_day.get(day, [])
         if day > today + dt.timedelta(days=1) and not evs:
             continue
-        need = 56 + max(len(evs), 1) * 50
-        if y + min(need, 56 + 50) > footer_top:
+        need = 64 + max(len(evs), 1) * row
+        if y + min(need, 64 + row) > footer_top:
             hidden += len(evs)
             continue
         label = day_label(day, today)
         d.text((M, y), label, font=head_f, fill=BLACK)
         if day > today + dt.timedelta(days=1) or day == today + dt.timedelta(days=1):
-            d.text((M + d.textlength(label, font=head_f) + 16, y + 8), day.strftime("%b ") + str(day.day),
-                   font=font("Medium", 26), fill=MID)
-        y += 56
+            d.text((M + d.textlength(label, font=head_f) + 18, y + 10), day.strftime("%b ") + str(day.day),
+                   font=font("SemiBold", 32), fill=MID)
+        y += 64
         if not evs:
-            d.text((M + time_col, y), "Nothing scheduled", font=font("Regular", 30), fill=MID)
-            y += 58
+            d.text((M + time_col, y), "Nothing scheduled", font=font("Medium", 36), fill=MID)
+            y += row + 4
             continue
         for ev in evs:
-            if y + 50 > footer_top:
+            if y + row > footer_top:
                 hidden += 1
                 continue
             if ev["start"] is None:
-                d.rounded_rectangle([M, y + 4, M + time_col - 30, y + 40], radius=8, fill=BLACK)
-                d.text((M + (time_col - 30) / 2, y + 22), "ALL DAY", font=font("Bold", 20), fill=WHITE, anchor="mm")
+                d.rounded_rectangle([M, y + 4, M + time_col - 30, y + 48], radius=8, fill=BLACK)
+                d.text((M + (time_col - 30) / 2, y + 26), "ALL DAY", font=font("Bold", 25), fill=WHITE, anchor="mm")
             else:
                 happening = ev["start"] <= now < ev["end"]
                 t = "Now" if happening else fmt_time(ev["start"])
                 d.text((M, y), t, font=time_f, fill=BLACK)
             tx = M + time_col
             if ev.get("label"):
-                bf = font("Bold", 22)
-                bw = max(36, d.textlength(ev["label"], font=bf) + 18)
-                d.rounded_rectangle([tx, y + 6, tx + bw, y + 40], radius=17, outline=BLACK, width=3)
-                d.text((tx + bw / 2, y + 23), ev["label"], font=bf, fill=BLACK, anchor="mm")
+                bf = font("Bold", 26)
+                bw = max(44, d.textlength(ev["label"], font=bf) + 22)
+                d.rounded_rectangle([tx, y + 5, tx + bw, y + 49], radius=22, outline=BLACK, width=3)
+                d.text((tx + bw / 2, y + 27), ev["label"], font=bf, fill=BLACK, anchor="mm")
                 tx += bw + 14
             d.text((tx, y), fit(d, ev["title"], title_f, W - M - tx), font=title_f, fill=BLACK)
-            y += 50
-        y += 16
+            y += row
+        y += 14
 
     if hidden:
-        d.text((W - M, footer_top - 40), f"+{hidden} more", font=font("Medium", 26), fill=MID, anchor="ra")
+        d.text((W - M, footer_top - 46), f"+{hidden} more", font=font("SemiBold", 32), fill=MID, anchor="ra")
 
     # Footer ---------------------------------------------------------------
     d.line([M, footer_top, W - M, footer_top], fill=LIGHT, width=2)
     stamp = f"Updated {now.strftime('%a')} {fmt_time(now)}" + (f"  ·  {note}" if note else "")
     if errors:
         stamp += "  ·  " + " / ".join(errors)
-    d.text((M, footer_top + 18), fit(d, stamp, font("Regular", 24), W - 2 * M - 230), font=font("Regular", 24), fill=MID)
+    d.text((M, footer_top + 18), fit(d, stamp, font("Medium", 28), W - 2 * M - 250), font=font("Medium", 28), fill=MID)
     return img
 
 
