@@ -51,7 +51,17 @@ jobs:
         with:
           path: site
 
-      - uses: actions/deploy-pages@v4
+      # The deploy sometimes can't see the artifact it was just handed (a GitHub
+      # hiccup); wait and try once more before failing the run.
+      - id: deploy
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+
+      - if: steps.deploy.outcome == 'failure'
+        run: sleep 30
+
+      - if: steps.deploy.outcome == 'failure'
+        uses: actions/deploy-pages@v4
 
       # GitHub pauses scheduled workflows after 60 days without repo activity.
       # Re-enabling the workflow through the API keeps the schedule alive.
