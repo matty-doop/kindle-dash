@@ -487,8 +487,44 @@ fetch_quote() {
   fi
 }
 
+# ---- tap to flip pages (on the charger) --------------------------------------
+TAP="${TAP:-1}"
+TAP_HOLD="${TAP_HOLD:-120}"       # a tapped-to page stays this many seconds
+TOUCH=""
+manual_until=0
+for ev in /sys/class/input/event*; do
+  nm=$(cat "$ev/device/name" 2>/dev/null)
+  case "$nm" in
+    *[Tt]ouch*|*_mt*|*zforce*|*cyttsp*|*pt_mt*)
+      TOUCH="/dev/input/${ev##*/}"; log "touch input: $nm ($TOUCH)"; break ;;
+  esac
+done
+[ "$TAP" = 1 ] && [ -z "$TOUCH" ] && log "touch input not found - tap to flip disabled"
+
+# Wait up to $1 seconds; returns 0 if the screen was touched.
+wait_tap() {
+  if [ "$TAP" != 1 ] || [ -z "$TOUCH" ]; then sleep "$1"; return 1; fi
+  t0=$(date +%s)
+  with_timeout "$1" dd if="$TOUCH" of=/dev/null bs=16 count=1 2>/dev/null
+  r=$?
+  [ "$r" = 0 ] && return 0
+  if [ "$r" != 137 ] && [ $(( $(date +%s) - t0 )) -lt 1 ]; then
+    log "touch input unreadable (dd rc=$r) - tap to flip disabled"; TOUCH=""
+    sleep "$1"
+  fi
+  return 1
+}
+
+flip() {
+  [ "$state" = ok ] || return 0
+  with_timeout 1 cat "$TOUCH" >/dev/null 2>&1   # swallow the rest of this touch
+  manual_until=$(( $(date +%s) + TAP_HOLD ))
+  if [ "$page" = main ] && [ -s "$QPNG" ]; then page=quote; draw_png "$QPNG"; else show_main; fi
+}
+
 # Once a minute while on the charger: update the clock, flip pages.
 tick() {
+  if [ "$(date +%s)" -lt "$manual_until" ]; then draw_clock; return; fi
   want=main
   if [ "$QUOTES" = 1 ] && [ "$state" = ok ] && [ -s "$QPNG" ] && ! is_night; then
     m=$(num "$(date +%M)")
@@ -508,8 +544,7 @@ awake_wait() {
     [ "$left" -le 0 ] && break
     nap=$(( 60 - $(num "$(date +%S)") ))
     [ "$nap" -gt "$left" ] && nap=$left
-    sleep "$nap"
-    tick
+    if wait_tap "$nap"; then flip; else tick; fi
   done
 }
 

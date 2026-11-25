@@ -28,3 +28,5 @@ CLOCK=1
 QUOTES=1
 QUOTE_EVERY=5
 QUOTE_FOR=1
+TAP=1          # tap the screen to switch pages (on the charger)
+TAP_HOLD=120   # a page you tap to stays up this many seconds
