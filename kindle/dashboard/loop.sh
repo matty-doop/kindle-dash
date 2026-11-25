@@ -107,6 +107,22 @@ fl_off=0          # frontlight forced off while discharging
 last_batt_log=0
 last_mode=""
 warned_nosuspend=0
+MODE=""
+
+# ---- clock and quote page (only while on the charger) ------------------------
+CLOCK="${CLOCK:-1}"               # live clock over the top-left of the dashboard
+QUOTES="${QUOTES:-1}"             # alternate with the quote page
+QUOTE_EVERY="${QUOTE_EVERY:-5}"   # ...one cycle every N minutes
+QUOTE_FOR="${QUOTE_FOR:-1}"       # ...of which the quote shows for this many
+CLOCK_FONT="$DIR/fonts/Inter-Bold.otf"
+QPNG=/tmp/dashboard-quote.png
+QETAG=/tmp/dashboard-quote.etag
+page=main                         # what's on screen: main | quote
+clock_drawn=""
+
+num() { echo "$1" | sed 's/^0*\([0-9]\)/\1/'; }   # "08" -> 8 (no octal surprises)
+# Current quarter-hour frame stamp: YYYYMMDDHH + 00/15/30/45.
+qstamp() { m=$(num "$(date +%M)"); printf '%s%02d' "$(date +%Y%m%d%H)" $((m / 15 * 15)); }
 
 draw_png() {
   if [ -n "$FBINK" ]; then "$FBINK" -f -W GC16 -g file="$1" >/dev/null 2>&1
@@ -424,6 +440,7 @@ SHOW_BATTERY="${SHOW_BATTERY:-1}"
 BATT_FONT="$DIR/fonts/Inter-Medium.otf"
 batt_drawn=""
 draw_battery() {
+  [ "$page" = main ] || return 0
   [ "$SHOW_BATTERY" = 1 ] && [ -n "$FBINK" ] && [ -f "$BATT_FONT" ] && [ "$state" = ok ] || return 0
   [ "$batt_warned" = 1 ] && return 0
   case "$bstat" in
@@ -434,6 +451,66 @@ draw_battery() {
   [ "$1" != force ] && [ "$txt" = "$batt_drawn" ] && return 0
   "$FBINK" -q -C GRAY4 -t regular="$BATT_FONT",px=28,top=1392,bottom=8,left=-300,right=56,padding=BOTH \
     "$txt" >/dev/null 2>&1 && batt_drawn=$txt
+}
+
+# The clock covers the weekday the renderer draws top-left (the date line below
+# repeats the weekday). Only on the charger: on battery it would go stale.
+draw_clock() {
+  [ "$CLOCK" = 1 ] && [ "$page" = main ] && [ "$state" = ok ] && [ "$bstat" != Discharging ] \
+    && [ -n "$FBINK" ] && [ -f "$CLOCK_FONT" ] || return 0
+  h=$(num "$(date +%H)"); mm=$(date +%M)
+  ap=am; [ "$h" -ge 12 ] && ap=pm
+  h=$((h % 12)); [ "$h" = 0 ] && h=12
+  txt="$h:$mm $ap"
+  [ "$1" != force ] && [ "$txt" = "$clock_drawn" ] && return 0
+  "$FBINK" -q -t regular="$CLOCK_FONT",px=96,top=30,bottom=1302,left=56,right=524,padding=BOTH \
+    "$txt" >/dev/null 2>&1 && clock_drawn=$txt
+}
+
+show_main() {
+  page=main
+  [ -s "$PNG" ] && draw_png "$PNG"
+  draw_clock force
+  draw_battery force
+}
+
+# Quote page for this quarter hour (fetched alongside the dashboard).
+fetch_quote() {
+  [ "$QUOTES" = 1 ] || return 0
+  qc=$(curl -s -o "${QPNG}.tmp" -w "%{http_code}" --max-time "$CURL_TIMEOUT" \
+         --etag-compare "$QETAG" --etag-save "$QETAG" "${URL%.png}-q-$(qstamp).png" 2>/dev/null)
+  if [ "$qc" = "200" ] && [ -s "${QPNG}.tmp" ]; then
+    mv "${QPNG}.tmp" "$QPNG"
+  else
+    rm -f "${QPNG}.tmp"
+    [ "$qc" = "404" ] && rm -f "$QPNG"   # no quote for now: skip the page
+  fi
+}
+
+# Once a minute while on the charger: update the clock, flip pages.
+tick() {
+  want=main
+  if [ "$QUOTES" = 1 ] && [ "$state" = ok ] && [ -s "$QPNG" ] && ! is_night; then
+    m=$(num "$(date +%M)")
+    [ $((m % QUOTE_EVERY)) -ge $((QUOTE_EVERY - QUOTE_FOR)) ] && want=quote
+  fi
+  if [ "$want" != "$page" ]; then
+    if [ "$want" = quote ]; then page=quote; draw_png "$QPNG"; else show_main; fi
+  else
+    draw_clock
+  fi
+}
+
+awake_wait() {
+  end=$(( $(date +%s) + $1 ))
+  while :; do
+    left=$(( end - $(date +%s) ))
+    [ "$left" -le 0 ] && break
+    nap=$(( 60 - $(num "$(date +%S)") ))
+    [ "$nap" -gt "$left" ] && nap=$left
+    sleep "$nap"
+    tick
+  done
 }
 
 # ---- polling ----------------------------------------------------------------
@@ -448,12 +525,13 @@ show_error() {
     draw_text "$msg"
   fi
   state="$kind"
+  page=main; clock_drawn=""
   log "error screen: $kind (code=$code)"
 }
 
-# The renderer publishes one frame per hour (<name>-YYYYMMDDHH.png) for the
-# next 24 hours. Ask for this hour's frame; if it doesn't exist (the renderer
-# hasn't run for over a day), fall back to the plain image.
+# The renderer publishes one frame per 15 minutes (<name>-YYYYMMDDHHMM.png) for
+# the next 24 hours. Ask for this quarter's frame; if it doesn't exist (the
+# renderer hasn't run for over a day), fall back to the plain image.
 fetch() {
   if [ "$state" = "ok" ]; then
     # Healthy: conditional GET (304 when unchanged).
@@ -468,14 +546,13 @@ fetch() {
 }
 
 poll() {
-  code=$(fetch "${URL%.png}-$(date +%Y%m%d%H).png")
+  code=$(fetch "${URL%.png}-$(qstamp).png")
   [ "$code" = "404" ] && code=$(fetch "$URL")
 
   if [ "$code" = "200" ] && [ -s "${PNG}.tmp" ]; then
     mv "${PNG}.tmp" "$PNG"
-    draw_png "$PNG"
     fails=0; net_fails=0; state=ok
-    draw_battery force
+    [ "$page" = main ] && show_main
     log "redraw (changed)"
   elif [ "$code" = "304" ]; then
     rm -f "${PNG}.tmp"
@@ -516,7 +593,11 @@ poll() {
 
 # Pick the cadence for the coming gap: sets MODE and WAIT (seconds).
 choose_mode() {
-  if is_night; then
+  if [ "$bstat" != "Discharging" ]; then
+    # On the charger: stay awake (clock, quotes) and poll on round boundaries
+    # (e.g. :00/:05/:10 for 300 s) so new 15-minute frames show promptly.
+    MODE=awake; now=$(date +%s); WAIT=$(( INTERVAL - now % INTERVAL + 5 ))
+  elif is_night; then
     MODE=night; WAIT=$(secs_to_next_hour)
   elif [ "$bstat" = "Discharging" ]; then
     if [ "$bcap" -lt "$BATT_THRESHOLD" ] 2>/dev/null; then
@@ -541,11 +622,15 @@ while true; do
   fi
   check_battery
   poll
+  [ "$state" = ok ] && fetch_quote
   draw_battery
   choose_mode
   if [ "$MODE" = "awake" ]; then
-    sleep "$WAIT"
+    tick
+    awake_wait "$WAIT"
   else
+    # Leaving the charger: take down the clock/quote before sleeping.
+    if [ "$page" != main ] || [ -n "$clock_drawn" ]; then clock_drawn=""; show_main; fi
     suspend_for "$WAIT"
   fi
 done

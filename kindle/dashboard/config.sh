@@ -21,3 +21,10 @@ NIGHT_END="06:00"
 FLINTENSITY=0
 
 TZ="EST5EDT,M3.2.0,M11.1.0"
+
+# While on the charger: live clock, and a quote page for QUOTE_FOR minute(s)
+# out of every QUOTE_EVERY minutes. Set to 0 to turn either off.
+CLOCK=1
+QUOTES=1
+QUOTE_EVERY=5
+QUOTE_FOR=1

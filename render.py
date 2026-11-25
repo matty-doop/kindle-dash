@@ -14,14 +14,17 @@ Config (environment variables):
 Countdowns: start a calendar event's title with "*" (e.g. "*Thanksgiving") and it
 gets a countdown chip until the day arrives.
 
-Besides OUT, each run also writes one frame per hour for the next 24 hours
-(<OUT stem>-YYYYMMDDHH.png), each drawn as the dashboard should look at that
-hour. The Kindle shows the frame for the current hour, so the hourly strip,
-"Today" and finished events stay correct even when runs are hours apart.
+Besides OUT, each run also writes one frame per 15 minutes for the next 24
+hours (<OUT stem>-YYYYMMDDHHMM.png), each drawn as the dashboard should look
+then, plus a matching quote page (<OUT stem>-q-YYYYMMDDHHMM.png). The Kindle
+shows the frame for the current quarter hour, so the hourly strip, "Today" and
+finished events stay correct even when runs are hours apart. The Kindle draws
+the live clock over the top-left of the dashboard itself.
 
 Run with --mock to render sample data without network access.
 """
 import datetime as dt
+import json
 import os
 import sys
 from pathlib import Path
@@ -487,13 +490,13 @@ def render(now, wx, events, errors, note="", alerts=(), updated=None):
 
     # Header -------------------------------------------------------------
     d.text((M, 40), now.strftime("%A"), font=font("Bold", 84), fill=BLACK)
-    d.text((M, 138), now.strftime("%B ") + str(now.day), font=font("Medium", 44), fill=DARK)
+    d.text((M, 148), now.strftime("%A, %b ") + str(now.day), font=font("Medium", 40), fill=DARK)
     sunline = moon_phase(today)
     if wx and wx["daily"].get("sunrise"):
         rise = dt.datetime.fromisoformat(wx["daily"]["sunrise"][0])
         sset = dt.datetime.fromisoformat(wx["daily"]["sunset"][0])
         sunline = f"Rise {fmt_time(rise)}  ·  Set {fmt_time(sset)}  ·  {sunline}"
-    d.text((M, 196), fit(d, sunline, font("Medium", 28), 600), font=font("Medium", 28), fill=MID)
+    d.text((M, 198), fit(d, sunline, font("Medium", 26), 600), font=font("Medium", 26), fill=MID)
 
     # Current weather (top right) ---------------------------------------
     y = 236
@@ -651,6 +654,69 @@ def render(now, wx, events, errors, note="", alerts=(), updated=None):
     return img
 
 
+# ------------------------------------------------------------------- quotes
+
+QUOTES = json.loads((Path(__file__).parent / "quotes.json").read_text())
+
+
+def thanksgiving_week(day):
+    """Sunday before through Sunday after US Thanksgiving (4th Thursday of November)."""
+    first = dt.date(day.year, 11, 1)
+    tg = first + dt.timedelta(days=(3 - first.weekday()) % 7 + 21)
+    return tg - dt.timedelta(days=4) <= day <= tg + dt.timedelta(days=3)
+
+
+def pick_quote(t):
+    """A different quote each 15 minutes; the order is reshuffled every day."""
+    import random
+    theme = "gratitude" if thanksgiving_week(t.date()) else "uplifting"
+    pool = list(QUOTES[theme])
+    random.Random(t.date().toordinal()).shuffle(pool)
+    return theme, pool[(t.hour * 4 + t.minute // 15) % len(pool)]
+
+
+def wrap(d, text, f, maxw):
+    lines, line = [], ""
+    for word in text.split():
+        trial = (line + " " + word).strip()
+        if d.textlength(trial, font=f) <= maxw or not line:
+            line = trial
+        else:
+            lines.append(line)
+            line = word
+    return lines + ([line] if line else [])
+
+
+def render_quote(t):
+    img = Image.new("L", (W, H), WHITE)
+    d = ImageDraw.Draw(img)
+    theme, (text, source) = pick_quote(t)
+    label = "Thanksgiving week" if theme == "gratitude" else "Something to think about"
+
+    d.text((M, 64), label.upper(), font=font("Bold", 30), fill=MID)
+    d.line([M, 116, W - M, 116], fill=BLACK, width=3)
+
+    # Largest size that fits the space between the rules.
+    maxw, top, bottom = W - 2 * M - 20, 230, H - 260
+    for size in range(84, 39, -4):
+        f = ImageFont.truetype(str(FONT_DIR / "Inter-MediumItalic.otf"), size)
+        lines = wrap(d, text, f, maxw)
+        lh = int(size * 1.32)
+        if len(lines) * lh + 130 <= bottom - top:
+            break
+    block = len(lines) * lh + 130
+    y = top + (bottom - top - block) // 2
+    d.text((M - 6, y - 150), "\u201c", font=font("Bold", 220), fill=LIGHT)
+    for ln in lines:
+        d.text((M + 10, y), ln, font=f, fill=BLACK)
+        y += lh
+    d.text((W - M, y + 50), "\u2014 " + source, font=font("SemiBold", 44), fill=DARK, anchor="ra")
+
+    d.line([M, H - 104, W - M, H - 104], fill=LIGHT, width=2)
+    d.text((M, H - 84), t.strftime("%A, %B ") + str(t.day), font=font("Medium", 32), fill=MID)
+    return img
+
+
 # --------------------------------------------------------------------- mock
 
 def mock(now):
@@ -736,15 +802,17 @@ def main():
     render(now, wx_at(wx, now, wx_time), events, errors, note, alerts).save(out, optimize=True)
     print("wrote", out)
 
-    # One frame per hour for the next 24 hours.
-    top = now.replace(minute=0, second=0, microsecond=0)
-    for h in range(25):
-        t = now if h == 0 else top + dt.timedelta(hours=h, minutes=1)
+    # One dashboard frame and one quote page per 15 minutes for the next 24 hours.
+    top = now.replace(minute=now.minute // 15 * 15, second=0, microsecond=0)
+    for k in range(97):
+        t = now if k == 0 else top + dt.timedelta(minutes=15 * k + 1)
+        stamp = t.strftime("%Y%m%d%H") + f"{t.minute // 15 * 15:02d}"
         fwx = wx_at(wx, t, wx_time)
         ferr = errors + (["weather failed"] if wx and not fwx and "weather failed" not in errors else [])
-        img = render(t, fwx, events, ferr, note, alerts, updated=now)
-        img.save(out.with_name(f"{out.stem}-{t.strftime('%Y%m%d%H')}.png"), optimize=True)
-    print("wrote 25 hourly frames")
+        render(t, fwx, events, ferr, note, alerts, updated=now).save(
+            out.with_name(f"{out.stem}-{stamp}.png"), optimize=True)
+        render_quote(t).save(out.with_name(f"{out.stem}-q-{stamp}.png"), optimize=True)
+    print("wrote 97 dashboard frames + 97 quote pages")
 
 
 if __name__ == "__main__":
