@@ -29,8 +29,8 @@ Weather + Google Calendar on a jailbroken Kindle Paperwhite 4 (1072×1448).
 - Sunrise, sunset and moon phase sit under the date.
 - The Kindle draws its own battery level bottom-right (`SHOW_BATTERY=0` in config.sh to hide).
 
-**On the charger:** a live clock (top left, every minute) and a quote page shown for 1 minute
-out of every 5. Quotes come from `quotes.json` (gratitude during Thanksgiving week, uplifting
+**On the charger:** a live clock (top left, every minute) and a quote page for 30 seconds
+of every minute. Quotes come from `quotes.json` (gratitude during Thanksgiving week, uplifting
 otherwise), a new one every 15 minutes.
 
 **Exit:** hold the power button ~40 s until the Kindle restarts. Nothing starts on boot.

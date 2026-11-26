@@ -28,11 +28,12 @@ FLINTENSITY=0
 
 TZ="EST5EDT,M3.2.0,M11.1.0"
 
-# While on the charger: live clock, and a quote page for QUOTE_FOR minute(s)
-# out of every QUOTE_EVERY minutes. Set to 0 to turn either off.
+# While on the charger: live clock, and a quote page for the last QUOTE_SECS
+# seconds of every QUOTE_CYCLE seconds (default: dashboard :00-:29, quote
+# :30-:59). Set CLOCK or QUOTES to 0 to turn either off.
 CLOCK=1
 QUOTES=1
-QUOTE_EVERY=5
-QUOTE_FOR=1
+QUOTE_CYCLE=60
+QUOTE_SECS=30
 TAP=1          # tap the screen to switch pages (on the charger)
 TAP_HOLD=120   # a page you tap to stays up this many seconds

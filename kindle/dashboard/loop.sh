@@ -112,8 +112,9 @@ MODE=""
 # ---- clock and quote page (only while on the charger) ------------------------
 CLOCK="${CLOCK:-1}"               # live clock over the top-left of the dashboard
 QUOTES="${QUOTES:-1}"             # alternate with the quote page
-QUOTE_EVERY="${QUOTE_EVERY:-5}"   # ...one cycle every N minutes
-QUOTE_FOR="${QUOTE_FOR:-1}"       # ...of which the quote shows for this many
+QUOTE_CYCLE="${QUOTE_CYCLE:-60}"  # ...one dashboard/quote cycle every N seconds
+QUOTE_SECS="${QUOTE_SECS:-30}"    # ...of which the quote shows for the last N seconds
+TICK="${TICK:-30}"                # how often to wake while on the charger (s)
 CLOCK_FONT="$DIR/fonts/Inter-Bold.otf"
 QPNG=/tmp/dashboard-quote.png
 QETAG=/tmp/dashboard-quote.etag
@@ -578,8 +579,7 @@ tick() {
   if [ "$(date +%s)" -lt "$manual_until" ]; then draw_clock; return; fi
   want=main
   if [ "$QUOTES" = 1 ] && [ "$state" = ok ] && [ -s "$QPNG" ] && ! is_night; then
-    m=$(num "$(date +%M)")
-    [ $((m % QUOTE_EVERY)) -ge $((QUOTE_EVERY - QUOTE_FOR)) ] && want=quote
+    [ $(( $(date +%s) % QUOTE_CYCLE )) -ge $(( QUOTE_CYCLE - QUOTE_SECS )) ] && want=quote
   fi
   if [ "$want" != "$page" ]; then
     if [ "$want" = quote ]; then page=quote; draw_png "$QPNG"; else show_main; fi
@@ -593,7 +593,7 @@ awake_wait() {
   while :; do
     left=$(( end - $(date +%s) ))
     [ "$left" -le 0 ] && break
-    nap=$(( 60 - $(num "$(date +%S)") ))
+    nap=$(( TICK - $(date +%s) % TICK ))      # wake on :00 / :30
     [ "$nap" -gt "$left" ] && nap=$left
     if wait_tap "$nap"; then flip; else tick; fi
   done
