@@ -566,6 +566,7 @@ wait_tap() {
 
 flip() {
   [ "$state" = ok ] || return 0
+  log "tap"
   with_timeout 1 cat "$TOUCH" >/dev/null 2>&1   # swallow the rest of this touch
   manual_until=$(( $(date +%s) + TAP_HOLD ))
   if [ "$page" = main ] && [ -s "$QPNG" ]; then page=quote; draw_png "$QPNG"; else show_main; fi
@@ -709,6 +710,11 @@ while true; do
   poll
   [ "$state" = ok ] && fetch_quote
   draw_battery
+  hb_now=$(date +%s)
+  if [ $(( hb_now - ${last_hb:-0} )) -ge 3600 ]; then
+    log "heartbeat: state=$state page=$page clock='$clock_drawn' light=${light_now:-?} touch=${TOUCH:-none} frame=$(qstamp) code=$code"
+    last_hb=$hb_now
+  fi
   choose_mode
   if [ "$MODE" = "awake" ]; then
     tick
