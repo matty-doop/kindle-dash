@@ -412,18 +412,13 @@ check_battery() {
     log "battery ${bcap}% ${bstat}${cur:+ ${cur}uA}"
     last_batt_log=$now
   fi
+  update_light
   if [ "$bstat" = "Discharging" ]; then
-    if [ "$fl_off" = 0 ] && [ "$FLINTENSITY" -gt 0 ] 2>/dev/null; then
-      lipc-set-prop com.lab126.powerd flIntensity 0 2>/dev/null; fl_off=1
-    fi
     [ "$bcap" -le "$BATT_CRITICAL" ] 2>/dev/null && power_off_clean
     if [ "$bcap" -lt "$BATT_THRESHOLD" ] 2>/dev/null && [ "$batt_warned" = 0 ]; then
       draw_battery_warning
     fi
   else
-    if [ "$fl_off" = 1 ]; then
-      lipc-set-prop com.lab126.powerd flIntensity "$FLINTENSITY" 2>/dev/null; fl_off=0
-    fi
     if [ "$batt_warned" = 1 ]; then
       batt_warned=0
       rm -f "$ETAG"  # force a 200 next poll so the list replaces the warning
@@ -487,6 +482,60 @@ fetch_quote() {
   fi
 }
 
+# ---- frontlight schedule (on the charger) --------------------------------------
+# Off in daylight; EVENING_LIGHT from sunset until BEDTIME; NIGHT_LIGHT from
+# BEDTIME until sunrise. Sunrise/sunset are computed here for LAT/LON.
+# Always off on battery. LIGHT=0 uses the fixed FLINTENSITY instead.
+LIGHT="${LIGHT:-1}"
+EVENING_LIGHT="${EVENING_LIGHT:-8}"   # 0..24
+NIGHT_LIGHT="${NIGHT_LIGHT:-2}"
+BEDTIME="${BEDTIME:-$NIGHT_START}"
+LAT="${LAT:-40.8072}"; LON="${LON:--77.9486}"
+light_now=""; sun_day=""; sunrise_min=420; sunset_min=1020
+
+set_light() {
+  [ "$1" = "$light_now" ] && return 0
+  lipc-set-prop com.lab126.powerd flIntensity "$1" 2>/dev/null && { light_now=$1; log "frontlight $1"; }
+}
+
+update_sun() {
+  d=$(date +%Y%m%d); [ "$d" = "$sun_day" ] && return 0
+  z=$(date +%z 2>/dev/null)
+  case "$z" in
+    [-+][0-9][0-9][0-9][0-9])
+      sg=1; [ "${z%"${z#?}"}" = "-" ] && sg=-1
+      off=$(( sg * ( $(num "$(echo "$z" | cut -c2-3)") * 60 + $(num "$(echo "$z" | cut -c4-5)") ) )) ;;
+    *) off=-300 ;;
+  esac
+  sun=$(awk -v doy="$(num "$(date +%j)")" -v lat="$LAT" -v lon="$LON" -v off="$off" 'BEGIN {
+    pi = atan2(0, -1); g = 2 * pi / 365 * (doy - 1)
+    eqt = 229.18 * (0.000075 + 0.001868*cos(g) - 0.032077*sin(g) - 0.014615*cos(2*g) - 0.040849*sin(2*g))
+    dec = 0.006918 - 0.399912*cos(g) + 0.070257*sin(g) - 0.006758*cos(2*g) + 0.000907*sin(2*g) \
+          - 0.002697*cos(3*g) + 0.00148*sin(3*g)
+    la = lat * pi / 180
+    x = cos(90.833 * pi / 180) / (cos(la) * cos(dec)) - (sin(la)/cos(la)) * (sin(dec)/cos(dec))
+    if (x < -1 || x > 1) exit
+    ha = atan2(sqrt(1 - x*x), x) * 180 / pi
+    printf "%d %d\n", 720 - 4*(lon + ha) - eqt + off, 720 - 4*(lon - ha) - eqt + off }')
+  set -- $sun
+  if [ -n "$2" ]; then sunrise_min=$1; sunset_min=$2; sun_day=$d; log "sun: rise $1 set $2 (minutes after midnight)"; fi
+}
+
+update_light() {
+  if [ "$bstat" = "Discharging" ]; then set_light 0; return 0; fi
+  if [ "$LIGHT" != 1 ]; then set_light "$FLINTENSITY"; return 0; fi
+  update_sun
+  lm=$(hhmm_to_min "$(date +%H:%M)"); bed=$(hhmm_to_min "$BEDTIME")
+  if [ "$lm" -ge "$sunrise_min" ] && [ "$lm" -lt "$sunset_min" ]; then
+    lvl=0                                                  # daylight
+  elif [ "$bed" -gt "$sunset_min" ]; then                  # bedtime before midnight
+    if [ "$lm" -ge "$sunset_min" ] && [ "$lm" -lt "$bed" ]; then lvl=$EVENING_LIGHT; else lvl=$NIGHT_LIGHT; fi
+  else                                                     # bedtime after midnight
+    if [ "$lm" -ge "$sunset_min" ] || [ "$lm" -lt "$bed" ]; then lvl=$EVENING_LIGHT; else lvl=$NIGHT_LIGHT; fi
+  fi
+  set_light "$lvl"
+}
+
 # ---- tap to flip pages (on the charger) --------------------------------------
 TAP="${TAP:-1}"
 TAP_HOLD="${TAP_HOLD:-120}"       # a tapped-to page stays this many seconds
@@ -524,6 +573,7 @@ flip() {
 
 # Once a minute while on the charger: update the clock, flip pages.
 tick() {
+  update_light
   if [ "$(date +%s)" -lt "$manual_until" ]; then draw_clock; return; fi
   want=main
   if [ "$QUOTES" = 1 ] && [ "$state" = ok ] && [ -s "$QPNG" ] && ! is_night; then

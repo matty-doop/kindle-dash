@@ -17,7 +17,13 @@ BATTERY_LOW_INTERVAL=3600  # on battery below 20%
 NIGHT_START="23:00"
 NIGHT_END="06:00"
 
-# Frontlight: 0 = off ... 24 = max. Forced off on battery.
+# Frontlight (on the charger; always off on battery). Levels 0..24.
+LIGHT=1              # 1 = follow the schedule below, 0 = fixed FLINTENSITY
+EVENING_LIGHT=8      # sunset -> BEDTIME
+NIGHT_LIGHT=2        # BEDTIME -> sunrise
+BEDTIME="23:00"
+LAT=40.8072          # for sunrise/sunset (Grays Woods)
+LON=-77.9486
 FLINTENSITY=0
 
 TZ="EST5EDT,M3.2.0,M11.1.0"
